@@ -1,4 +1,4 @@
-wd: /home/ec2-user/test_workdir
+wd: /seqcmd/workdir
 blacklist_dir: 00.blacklist
 fastq_dir: 00.fastq
 donor_map_dir: 00.donor_map
