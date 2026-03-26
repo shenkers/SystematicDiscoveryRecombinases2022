@@ -2,7 +2,6 @@ configfile: 'config.yml'
 
 from os.path import basename, join
 from glob import glob
-from functions import *
 
 WD = config['wd']
 FASTQ_DIR = join(WD,config['fastq_dir'])
@@ -29,10 +28,23 @@ RESULTS_DIR = join(WD,config['results_dir'])
 
 SAMPLES = [basename(f).split('.')[0] for f in glob(join(FASTQ_DIR,'*R1.fq.gz'))]
 
+# ── Biocontainer image URIs ────────────────────────────────────────────────────
+# All images are pulled at runtime; no docker build required.
+BWA_IMAGE        = "docker://quay.io/biocontainers/bwa:0.7.17--hed695b0_7"
+# bwa + samtools: use conda env (avoids needing to know a specific mulled container hash)
+BWA_SAM_CONDA    = "envs/bwa_samtools.yaml"
+FASTP_IMAGE      = "docker://quay.io/biocontainers/fastp:0.23.4--h5f740d0_0"
+FASTQC_IMAGE     = "docker://quay.io/biocontainers/fastqc:0.12.1--hdfd78af_0"
+SAMTOOLS_IMAGE   = "docker://quay.io/biocontainers/samtools:1.18--hd87286a_0"
+BEDTOOLS_IMAGE   = "docker://quay.io/biocontainers/bedtools:2.31.1--hf5e1c6e_2"
+
+# ── Rules ──────────────────────────────────────────────────────────────────────
+
 rule all:
     input:
         join(RESULTS_DIR, "raw_counts.filtered.tsv")
     run: pass
+
 
 rule clean_umi:
     input:
@@ -44,24 +56,28 @@ rule clean_umi:
     params:
         metadata=join(WD, "metadata.tsv"),
         sample='{sample}'
-    run:
-        clean_umi(input,output,params)
+    conda: "envs/python_bio.yaml"
+    script: "scripts/clean_umi.py"
+
 
 rule bwa_index_donor:
     input:
         fna=join(DONOR_MAP_DIR,"{sample}.fasta")
     output:
         amb=join(DONOR_MAP_DIR,"{sample}.fasta.amb")
+    container: BWA_IMAGE
     shell:
         """
         bwa index {input.fna}
         """
+
 
 rule bwa_index_donor_check:
     input:
         donor_check=join(DONOR_CHECK_DIR,"donor_check.fna")
     output:
         amb=join(DONOR_CHECK_DIR,"donor_check.fna.amb")
+    container: BWA_IMAGE
     shell:
         """
         bwa index {input.donor_check}
@@ -77,10 +93,12 @@ rule fastp:
         r2=join(TRIMMED_DIR,"{sample}.R2.fq.gz")
     params:
         outdir=TRIMMED_DIR,outprefix=join(TRIMMED_DIR,"{sample}")
+    container: FASTP_IMAGE
     shell:
         """
         fastp --detect_adapter_for_pe --adapter_sequence=AGATCGGAAGAGCACACGTCTGAACTCCAGTCA --adapter_sequence_r2=CTGTCTCTTATACACATCTGACGCTGCCGACGA -i {input.r1} -I {input.r2} -o {output.r1} -O {output.r2}
         """
+
 
 rule fastqc:
     input:
@@ -93,11 +111,13 @@ rule fastqc:
         raw_r2=join(FASTQ_DIR,"{sample}.R2_fastqc.html"),
         trim_r1=join(TRIMMED_DIR,"{sample}.R1_fastqc.html"),
         trim_r2=join(TRIMMED_DIR,"{sample}.R2_fastqc.html")
+    container: FASTQC_IMAGE
     shell:
         """
         fastqc -f fastq {input.raw_r1} {input.raw_r2}
         fastqc -f fastq {input.trim_r1} {input.trim_r2}
         """
+
 
 rule count_reads:
     input:
@@ -114,6 +134,7 @@ rule count_reads:
         counts_clean_r2=join(CLEAN_DIR,"{sample}.R2.count.txt"),
         counts_trim_r1=join(TRIMMED_DIR,"{sample}.R1.count.txt"),
         counts_trim_r2=join(TRIMMED_DIR,"{sample}.R2.count.txt")
+    container: SAMTOOLS_IMAGE
     shell:
         """
         zcat {input.raw_r1} | wc -l | awk '{{print $1/4}}' > {output.counts_raw_r1}
@@ -123,6 +144,7 @@ rule count_reads:
         zcat {input.trim_r1} | wc -l | awk '{{print $1/4}}' > {output.counts_trim_r1}
         zcat {input.trim_r2} | wc -l | awk '{{print $1/4}}' > {output.counts_trim_r2}
         """
+
 
 rule bwa_align_donor:
     input:
@@ -136,6 +158,7 @@ rule bwa_align_donor:
         bam2=join(DONOR_ALIGNED_DIR,'{sample}.donor.R2.bam'),
         bai2=join(DONOR_ALIGNED_DIR,'{sample}.donor.R2.bam.bai')
     threads: 16
+    conda: BWA_SAM_CONDA
     shell:
         """
         bwa mem -t {threads} {input.fna} {input.r1} | samtools view -@ {threads} -b -F 4 | samtools sort -@ {threads} > {output.bam1}
@@ -143,6 +166,7 @@ rule bwa_align_donor:
         bwa mem -t {threads} {input.fna} {input.r2} | samtools view -@ {threads} -b -F 4 | samtools sort -@ {threads} > {output.bam2}
         samtools index {output.bam2}
         """
+
 
 rule bwa_align_donor_check:
     input:
@@ -156,6 +180,7 @@ rule bwa_align_donor_check:
         bam2=join(DONOR_CHECK_ALIGNED_DIR,'{sample}.donor_check.R2.bam'),
         bai2=join(DONOR_CHECK_ALIGNED_DIR,'{sample}.donor_check.R2.bam.bai')
     threads: 16
+    conda: BWA_SAM_CONDA
     shell:
         """
         bwa mem -a -t {threads} {input.donor_check} {input.r1} | samtools view -@ {threads} -b -F 4 | samtools sort -@ {threads} > {output.bam1}
@@ -163,6 +188,7 @@ rule bwa_align_donor_check:
         bwa mem -a -t {threads} {input.donor_check} {input.r2} | samtools view -@ {threads} -b -F 4 | samtools sort -@ {threads} > {output.bam2}
         samtools index {output.bam2}
         """
+
 
 rule bwa_align_human:
     input:
@@ -176,6 +202,7 @@ rule bwa_align_human:
     params:
         genome=join(GENOME_DIR,'hg38.fna')
     threads: 16
+    conda: BWA_SAM_CONDA
     shell:
         """
         bwa mem -t {threads} {params.genome} {input.r1} | samtools view -@ {threads} -b -F 4 | samtools sort -@ {threads} > {output.bam1}
@@ -183,6 +210,7 @@ rule bwa_align_human:
         bwa mem -t {threads} {params.genome} {input.r2} | samtools view -@ {threads} -b -F 4 | samtools sort -@ {threads} > {output.bam2}
         samtools index {output.bam2}
         """
+
 
 rule analyze_reads:
     input:
@@ -199,9 +227,10 @@ rule analyze_reads:
     params:
         sample='{sample}',
         blacklist=join(BLACKLIST_DIR,'hg38.bed')
-    threads: 4 #temporary to prevent OOM error
-    run:
-        analyze_reads(input, output, params)
+    threads: 4
+    conda: "envs/python_bio.yaml"
+    script: "scripts/analyze_reads.py"
+
 
 rule get_junction_reads:
     input:
@@ -211,8 +240,9 @@ rule get_junction_reads:
     output:
         r1=join(JUNCTION_READS_DIR,"{sample}.junction.R1.fq.gz"),
         r2=join(JUNCTION_READS_DIR,"{sample}.junction.R2.fq.gz")
-    run:
-        get_junction_reads(input,output)
+    conda: "envs/python_bio.yaml"
+    script: "scripts/get_junction_reads.py"
+
 
 rule bwa_align_both_human:
     input:
@@ -225,51 +255,73 @@ rule bwa_align_both_human:
         genome=join(GENOME_DIR,'hg38.fna'),
         blacklist=join(BLACKLIST_DIR,'hg38.bed')
     threads: 16
+    conda: BWA_SAM_CONDA
     shell:
         """
         bwa mem -t {threads} {params.genome} {input.r1} {input.r2} | samtools sort -@ {threads} | samtools view -h -q 30 | samtools view -h -F 2048 | awk '{{if ($1 ~ /^@/){{print}} else if ($9 > -1500 && $9 < 1500) {{print}}}}' | samtools view -h -b > {output.bam}
-        bedtools intersect -v -wa -a {output.bam} -b {params.blacklist} -wa > {output.bam}.tmp.bam
-        mv {output.bam}.tmp.bam {output.bam}
         samtools index {output.bam}
         """
 
-rule get_donor_reads:
-	input:
-		summary=join(READ_ANALYSIS_DIR, "{sample}.analysis.tsv.gz"),
-		r1=join(TRIMMED_DIR, "{sample}.R1.fq.gz"),
-		r2=join(TRIMMED_DIR, "{sample}.R2.fq.gz")
-	output:
-		r1=join(DONOR_READS_DIR, "{sample}.donor.R1.fq.gz"),
-		r2=join(DONOR_READS_DIR, "{sample}.donor.R2.fq.gz")
-	run:
-		get_donor_reads(input, output)
 
-rule bwa_align_both_donor:
-	input:
-		r1=join(DONOR_READS_DIR, "{sample}.donor.R1.fq.gz"),
-		r2=join(DONOR_READS_DIR, "{sample}.donor.R2.fq.gz"),
-		fna=join(DONOR_MAP_DIR, "{sample}.fasta"),
-		amb=join(DONOR_MAP_DIR, "{sample}.fasta.amb")
-	output:
-		bam = join(DONOR_BOTH_ALIGNED_DIR, '{sample}.donor.both.bam'),
-		bai = join(DONOR_BOTH_ALIGNED_DIR, '{sample}.donor.both.bam.bai'),
-	threads: 16
-	shell:
-		"""
-		bwa mem -t {threads} {input.fna} {input.r1} {input.r2} | samtools sort -@ {threads} | samtools view -h -q 30 | samtools view -h -q 30 | samtools view -h -F 2048 | samtools view -h -b > {output.bam}
-		samtools index {output.bam}
-		"""
-
-rule markdup:
+rule blacklist_filter_both_human:
+    """Filter blacklisted regions from the paired human alignment."""
     input:
         bam=join(HUMAN_BOTH_ALIGNED_DIR,'{sample}.human.both.bam'),
         bai=join(HUMAN_BOTH_ALIGNED_DIR,'{sample}.human.both.bam.bai')
+    output:
+        bam=join(HUMAN_BOTH_ALIGNED_DIR,'{sample}.human.both.filtered.bam'),
+        bai=join(HUMAN_BOTH_ALIGNED_DIR,'{sample}.human.both.filtered.bam.bai')
+    params:
+        blacklist=join(BLACKLIST_DIR,'hg38.bed')
+    conda: "envs/python_bio.yaml"
+    shell:
+        """
+        bedtools intersect -v -wa -a {input.bam} -b {params.blacklist} > {output.bam}
+        samtools index {output.bam}
+        """
+
+
+rule get_donor_reads:
+    input:
+        summary=join(READ_ANALYSIS_DIR, "{sample}.analysis.tsv.gz"),
+        r1=join(TRIMMED_DIR, "{sample}.R1.fq.gz"),
+        r2=join(TRIMMED_DIR, "{sample}.R2.fq.gz")
+    output:
+        r1=join(DONOR_READS_DIR, "{sample}.donor.R1.fq.gz"),
+        r2=join(DONOR_READS_DIR, "{sample}.donor.R2.fq.gz")
+    conda: "envs/python_bio.yaml"
+    script: "scripts/get_donor_reads.py"
+
+
+rule bwa_align_both_donor:
+    input:
+        r1=join(DONOR_READS_DIR, "{sample}.donor.R1.fq.gz"),
+        r2=join(DONOR_READS_DIR, "{sample}.donor.R2.fq.gz"),
+        fna=join(DONOR_MAP_DIR, "{sample}.fasta"),
+        amb=join(DONOR_MAP_DIR, "{sample}.fasta.amb")
+    output:
+        bam = join(DONOR_BOTH_ALIGNED_DIR, '{sample}.donor.both.bam'),
+        bai = join(DONOR_BOTH_ALIGNED_DIR, '{sample}.donor.both.bam.bai'),
+    threads: 16
+    conda: BWA_SAM_CONDA
+    shell:
+        """
+        bwa mem -t {threads} {input.fna} {input.r1} {input.r2} | samtools sort -@ {threads} | samtools view -h -q 30 | samtools view -h -q 30 | samtools view -h -F 2048 | samtools view -h -b > {output.bam}
+        samtools index {output.bam}
+        """
+
+
+rule markdup:
+    input:
+        bam=join(HUMAN_BOTH_ALIGNED_DIR,'{sample}.human.both.filtered.bam'),
+        bai=join(HUMAN_BOTH_ALIGNED_DIR,'{sample}.human.both.filtered.bam.bai')
     output:
         collate=join(HUMAN_BOTH_ALIGNED_DIR,'{sample}.human.both.namecollate.bam'),
         fixmate=join(HUMAN_BOTH_ALIGNED_DIR,'{sample}.human.both.fixmate.bam'),
         psort=join(HUMAN_BOTH_ALIGNED_DIR,'{sample}.human.both.psort.bam'),
         bam=join(HUMAN_BOTH_ALIGNED_DIR,'{sample}.human.both.markdup.bam'),
         bai=join(HUMAN_BOTH_ALIGNED_DIR,'{sample}.human.both.markdup.bam.bai')
+    container: SAMTOOLS_IMAGE
     shell:
         """
         samtools collate -o {output.collate} {input.bam}
@@ -279,6 +331,7 @@ rule markdup:
         samtools index {output.bam}
         """
 
+
 rule mgefinder:
     input:
         bam=join(HUMAN_BOTH_ALIGNED_DIR,'{sample}.human.both.markdup.bam'),
@@ -286,10 +339,12 @@ rule mgefinder:
         find=join(MGEFINDER_DIR,'{sample}.find.tsv')
     params:
         sample='{sample}'
+    conda: "envs/mgefinder.yaml"
     shell:
         """
         mgefinder find -id {params.sample} -mcc 1 -mincount 1 {input.bam} -o {output.find}
         """
+
 
 rule kmer_flanks:
     input:
@@ -303,43 +358,47 @@ rule kmer_flanks:
         bed=join(KMER_FLANKS_DIR,'{sample}.kmer_flanks.bed')
     params:
         sample='{sample}'
-    run:
-        kmer_flanks(input,output,params)
+    conda: "envs/python_bio.yaml"
+    script: "scripts/kmer_flanks.py"
+
 
 rule umi_counts:
-	input:
-		tsv=join(KMER_FLANKS_DIR, '{sample}.kmer_flanks.tsv'),
-		bam=join(HUMAN_BOTH_ALIGNED_DIR, '{sample}.human.both.bam')
-	output:
-		tsv=join(UMI_COUNTS_DIR, '{sample}.umi_counts.tsv')
-	params:
-		sample='{sample}',
-		genome_file=join(GENOME_DIR, "hg38.genome.txt")
-	run:
-		count_umis(input, output, params)
+    input:
+        tsv=join(KMER_FLANKS_DIR, '{sample}.kmer_flanks.tsv'),
+        bam=join(HUMAN_BOTH_ALIGNED_DIR, '{sample}.human.both.filtered.bam')
+    output:
+        tsv=join(UMI_COUNTS_DIR, '{sample}.umi_counts.tsv')
+    params:
+        sample='{sample}',
+        genome_file=join(GENOME_DIR, "hg38.genome.txt")
+    conda: "envs/python_bio.yaml"
+    script: "scripts/umi_counts.py"
+
 
 rule donor_umi_counts:
-	input:
-		bam = join(DONOR_BOTH_ALIGNED_DIR, '{sample}.donor.both.bam'),
-	output:
-		tsv=join(UMI_COUNTS_DIR, '{sample}.donor_umi_counts.tsv')
-	params:
-		sample='{sample}'
-	run:
-		donor_count_umis(input, output, params)
+    input:
+        bam = join(DONOR_BOTH_ALIGNED_DIR, '{sample}.donor.both.bam'),
+    output:
+        tsv=join(UMI_COUNTS_DIR, '{sample}.donor_umi_counts.tsv')
+    params:
+        sample='{sample}'
+    conda: "envs/python_bio.yaml"
+    script: "scripts/donor_umi_counts.py"
+
 
 rule raw_counts:
     input:
         tsv=join(KMER_FLANKS_DIR,'{sample}.kmer_flanks.tsv'),
-        bam=join(HUMAN_BOTH_ALIGNED_DIR,'{sample}.human.both.bam'),
+        bam=join(HUMAN_BOTH_ALIGNED_DIR,'{sample}.human.both.filtered.bam'),
         rmdup_bam=join(HUMAN_BOTH_ALIGNED_DIR,'{sample}.human.both.markdup.bam')
     output:
         tsv=join(RAW_COUNTS_DIR,'{sample}.raw_counts.tsv')
     params:
         sample='{sample}',
         genome_file=join(GENOME_DIR,"hg38.genome.txt")
-    run:
-        count_raw(input,output,params)
+    conda: "envs/python_bio.yaml"
+    script: "scripts/raw_counts.py"
+
 
 rule integration_sites:
     input:
@@ -354,8 +413,9 @@ rule integration_sites:
         top=join(TARGET_SITES_DIR,'{sample}.sites.curated.top.fna'),
     params:
         slop=30,top=200,sample='{sample}'
-    run:
-        get_integration_sites(input,output,params)
+    conda: "envs/python_bio.yaml"
+    script: "scripts/integration_sites.py"
+
 
 rule get_site_annotations:
     input:
@@ -366,8 +426,9 @@ rule get_site_annotations:
         genes=join(GENOME_DIR,'hg38.genes.gff3'),
         exons=join(GENOME_DIR,'hg38.exons.gff3'),
         genome_file=join(GENOME_DIR,"hg38.genome.txt")
-    run:
-        get_site_annotations(input,output,params)
+    conda: "envs/python_bio.yaml"
+    script: "scripts/site_annotations.py"
+
 
 rule finalize_counts:
     input:
@@ -390,6 +451,7 @@ rule finalize_counts:
         workdir=WD,
         outdir=RESULTS_DIR,
         genome=join(GENOME_DIR,'hg38.fna')
+    conda: "envs/r_bio.yaml"
     shell:
         """
         Rscript scripts/finalize_counts.R {params.workdir} {params.outdir}

@@ -7,7 +7,10 @@ import pysam
 from Bio import SeqIO
 from Bio import pairwise2
 from pybedtools import BedTool
-from snakemake import shell
+import subprocess as _subprocess
+
+def shell(cmd):
+    _subprocess.run(cmd, shell=True, check=True)
 from umi_tools import UMIClusterer
 
 

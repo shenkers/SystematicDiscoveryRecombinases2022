@@ -1,4 +1,4 @@
-wd: /UDITAS/WORKDIR
+wd: /home/ec2-user/test_workdir
 blacklist_dir: 00.blacklist
 fastq_dir: 00.fastq
 donor_map_dir: 00.donor_map
