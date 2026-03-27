@@ -90,6 +90,14 @@ cut -f1,2 hg38.fna.fai > hg38.genome.txt
 The pipeline needs two GFF3 files filtered from the GENCODE v38 annotation:
 one containing only `gene` features and one containing only `exon` features.
 
+**Important:** The pipeline uses `bedtools intersect -sorted` with these GFF3 files,
+which requires them to be sorted in exactly the same chromosome order as
+`hg38.genome.txt`. GENCODE GFF3 files use alphabetical chromosome order (chr1,
+chr10, chr11, … chr2, …) while `hg38.genome.txt` follows the FASTA order (chr1,
+chr2, … chr10, …). The sort step below is mandatory — skipping it will cause
+`bedtools` to abort with a "different sort order" error at the `get_site_annotations`
+step.
+
 ```bash
 GENOME_DIR="/seqcmd/subset/reconstitute/workdir/00.genome"
 cd "${GENOME_DIR}"
@@ -102,7 +110,46 @@ zcat gencode.v38.annotation.gff3.gz | awk '$3=="gene" || /^#/' > hg38.genes.gff3
 zcat gencode.v38.annotation.gff3.gz | awk '$3=="exon" || /^#/' > hg38.exons.gff3
 
 rm gencode.v38.annotation.gff3.gz
+
+# Sort GFF3 files to match the chromosome order in hg38.genome.txt.
+# bedtools sort preserves lines beginning with '#' at the top.
+bedtools sort -g hg38.genome.txt -i hg38.genes.gff3 > hg38.genes.sorted.gff3 \
+    && mv hg38.genes.sorted.gff3 hg38.genes.gff3
+bedtools sort -g hg38.genome.txt -i hg38.exons.gff3 > hg38.exons.sorted.gff3 \
+    && mv hg38.exons.sorted.gff3 hg38.exons.gff3
 ```
+
+---
+
+## Critical: donor_check.fna sequence headers must match FASTQ sample names
+
+The pipeline determines which donor plasmid to expect for each sample using
+`params.sample`, which is derived directly from the FASTQ filename stem — i.e.
+the part before `.R1.fq.gz`. For example, a file named
+`Em12-biorep2-techrep2.R1.fq.gz` produces `params.sample = Em12-biorep2-techrep2`.
+
+The pipeline verifies each read by aligning it to `00.donor_check/donor_check.fna`
+and checking that the best-matching reference name equals `params.sample`. This
+means the FASTA headers in `donor_check.fna` **must exactly match the FASTQ
+filename stems** — not the short LSR name from `metadata.tsv`.
+
+If multiple samples in the same run share an identical donor sequence (same LSR,
+different biorep/techrep), they should be combined into a single FASTA record
+with names separated by `|`:
+
+```
+# correct — headers match the FASTQ stems
+>Em12-biorep1-techrep1|Em12-biorep2-techrep2
+GACGGGCACC...
+
+# wrong — short LSR name never matches params.sample
+>Em12
+GACGGGCACC...
+```
+
+A mismatch here causes `r1_donor_check` and `r2_donor_check` to be `False` for
+every read, which silently empties the junction read output (step 05) and all
+downstream steps, with no obvious error message.
 
 ---
 
