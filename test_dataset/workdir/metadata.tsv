@@ -1,0 +1,4 @@
+sample	lsr	biorep	techrep	i7_stagger	primer_seq	umi_start	umi_end
+Cp36-biorep1-techrep1	Cp36	1	1		TCGATCGAGGTTGCATTCGG	24	36
+Em12-biorep2-techrep2	Em12	2	2		TCGATCGAGGTTGCATTCGG	24	36
+Enc9-biorep1-techrep1	Enc9	1	1		TCGATCGAGGTTGCATTCGG	24	36
