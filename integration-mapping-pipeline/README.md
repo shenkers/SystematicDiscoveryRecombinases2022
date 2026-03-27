@@ -133,25 +133,37 @@ WORKDIR/
     ```
     
 ### Setting up the docker environment and running the pipeline
-* Navigate to this subdirectory of this repository on your machine:
-  ```
-  cd /path/to/SystematicDiscoveryRecombinases2022/integration-mapping-pipeline/
-  ```
-  Next, run: 
-  ```
-  source setup.sh
-  ```
-  This step will have to be repeated whenever logging back into the machine, unless you automate it.
 
-  If you haven't built the docker image, you can now build it with:
-  ```
-  integration_mapping_docker_build
-  ```
-  Now that the docker image is built, you can run your snakemake pipeline on your properly configured working directory with the command:
-  ```
-  integration_mapping_docker_snakemake WORKDIR/ 8
-  ```
-  Where `8` is a placehodler for the number of threads you'd like to use when executing the pipeline.
+#### 1. Build the Docker image
+
+From the `integration-mapping-pipeline/` directory:
+```bash
+docker build -t integration_mapping env/
+```
+This only needs to be done once (or after changes to `env/Dockerfile`).
+
+#### 2. Prepare your working directory
+
+Set up your working directory following the structure described above. All required input files must be in place before running the pipeline — the pipeline does not download reference files automatically.
+
+#### 3. Run the pipeline
+
+```bash
+docker run --rm \
+    -v /path/to/SystematicDiscoveryRecombinases2022/integration-mapping-pipeline/snakemake:/integration-mapping-pipeline/snakemake \
+    -v /path/to/your/WORKDIR:/integration-mapping-pipeline/WORKDIR \
+    integration_mapping \
+    snakemake -j 8 --keep-going --config wd=/integration-mapping-pipeline/WORKDIR
+```
+
+Replace:
+- `/path/to/SystematicDiscoveryRecombinases2022/integration-mapping-pipeline/snakemake` with the absolute path to the `snakemake/` directory in this repository
+- `/path/to/your/WORKDIR` with the absolute path to your working directory
+- `8` with the number of threads to use
+
+The `--config wd=/integration-mapping-pipeline/WORKDIR` flag tells Snakemake to use the container-internal mount point as the working directory root. This must be passed exactly as shown regardless of where your working directory lives on the host.
+
+The `--keep-going` flag allows the pipeline to continue running other samples if one job fails. Remove it if you want the run to stop on the first error.
 
 ### Results folder
 * Many directories will be created while the pipeline is executing. Here, we focus only on the `11.results` output folder.
