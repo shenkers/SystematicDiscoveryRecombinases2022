@@ -5,6 +5,13 @@ the integration mapping pipeline on a fresh EC2 instance. Large files (FASTQs,
 genome) are retrieved in the steps below; all other required files are already
 present here.
 
+All shell snippets below use `PROJECT_ROOT` to refer to the directory where you
+want to run the pipeline. Set it once before following the steps:
+
+```bash
+export PROJECT_ROOT="/path/to/your/working/directory"
+```
+
 ## Samples
 
 | Pipeline sample name      | SRX accession | SRR accession |
@@ -25,7 +32,7 @@ to already be installed.
 ```bash
 cd /path/to/workdir          # wherever you want to run from
 nextflow run nf-core/fetchngs \
-    --input /seqcmd/subset/reconstitute/ids.csv \
+    --input ${PROJECT_ROOT}/ids.csv \
     --outdir ./fetchngs_out \
     -profile docker \
     -r 1.12.0
@@ -43,7 +50,7 @@ in `workdir/00.fastq/`. Create symlinks with the right names:
 
 ```bash
 FETCHNGS_FASTQ="./fetchngs_out/fastq"
-FASTQ_DIR="/seqcmd/subset/reconstitute/workdir/00.fastq"
+FASTQ_DIR="${PROJECT_ROOT}/workdir/00.fastq"
 
 ln -sf "${FETCHNGS_FASTQ}/SRX17313194_SRR21306543_1.fastq.gz" "${FASTQ_DIR}/Cp36-biorep1-techrep1.R1.fq.gz"
 ln -sf "${FETCHNGS_FASTQ}/SRX17313194_SRR21306543_2.fastq.gz" "${FASTQ_DIR}/Cp36-biorep1-techrep1.R2.fq.gz"
@@ -64,7 +71,7 @@ chromosome names). Download and concatenate the per-chromosome FASTAs, then
 build the BWA index and supporting files.
 
 ```bash
-GENOME_DIR="/seqcmd/subset/reconstitute/workdir/00.genome"
+GENOME_DIR="${PROJECT_ROOT}/workdir/00.genome"
 cd "${GENOME_DIR}"
 
 # Download the per-chromosome FASTA archive (~900 MB)
@@ -90,16 +97,26 @@ cut -f1,2 hg38.fna.fai > hg38.genome.txt
 The pipeline needs two GFF3 files filtered from the GENCODE v38 annotation:
 one containing only `gene` features and one containing only `exon` features.
 
-**Important:** The pipeline uses `bedtools intersect -sorted` with these GFF3 files,
-which requires them to be sorted in exactly the same chromosome order as
-`hg38.genome.txt`. GENCODE GFF3 files use alphabetical chromosome order (chr1,
-chr10, chr11, … chr2, …) while `hg38.genome.txt` follows the FASTA order (chr1,
-chr2, … chr10, …). The sort step below is mandatory — skipping it will cause
-`bedtools` to abort with a "different sort order" error at the `get_site_annotations`
-step.
+**Important:** The pipeline uses `bedtools intersect -sorted` with these GFF3 files
+and with the aligned BAM files, which requires all of them to share exactly the
+same chromosome order as `hg38.genome.txt`. Two constraints apply:
+
+1. `hg38.genome.txt` must be derived directly from `hg38.fna.fai` (see Step 3)
+   so that it matches the chromosome order of the FASTA and the BAMs that were
+   aligned to it. Do not substitute a pre-downloaded chromosome sizes file — they
+   often use a different ordering (e.g. sorted by size) that will not match the
+   BAM headers.
+
+2. GENCODE GFF3 files use lexicographic chromosome order (chr1, chr10, chr11, …
+   chr2, …) while the hg38 analysis set FASTA, when concatenated with
+   `cat chr*.fa`, also uses lexicographic order — these happen to match, but the
+   sort step below is still required if you obtained genome.txt from any other
+   source. Skipping it will cause `bedtools` to abort with a "different sort
+   order" error at the `get_site_annotations`, `raw_counts`, or `umi_counts`
+   steps.
 
 ```bash
-GENOME_DIR="/seqcmd/subset/reconstitute/workdir/00.genome"
+GENOME_DIR="${PROJECT_ROOT}/workdir/00.genome"
 cd "${GENOME_DIR}"
 
 # Download GENCODE v38 annotation (~50 MB compressed)
@@ -200,7 +217,7 @@ Then run:
 ```bash
 docker run --rm \
     -v /path/to/SystematicDiscoveryRecombinases2022/integration-mapping-pipeline/snakemake:/integration-mapping-pipeline/snakemake \
-    -v /seqcmd/subset/reconstitute/workdir:/integration-mapping-pipeline/WORKDIR \
+    -v ${PROJECT_ROOT}/workdir:/integration-mapping-pipeline/WORKDIR \
     integration_mapping \
     snakemake -j 8 --keep-going --config wd=/integration-mapping-pipeline/WORKDIR
 ```
